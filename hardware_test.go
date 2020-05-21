@@ -10,7 +10,7 @@ func TestNewHost(t *testing.T) {
 	config := &MonitorConfig{
 		CPUTime:  10,
 		MemTime:  10,
-		NetTime:  10,
+		NetTime:  1,
 		DiskTime: 5 * 60,
 		IOTime:   10,
 	}
