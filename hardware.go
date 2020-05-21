@@ -1,6 +1,7 @@
 package device
 
 import (
+	"fmt"
 	"os"
 	"sync"
 	"syscall"
@@ -49,23 +50,18 @@ type (
 	}
 
 	Memory struct {
-		Used      float64 `json:"used"`
-		Total     float64 `json:"total"`
+		Used      uint64  `json:"used"`
+		Total     uint64  `json:"total"`
+		Free      uint64  `json:"free"`
 		UsageRate float64 `json:"usage_rate"`
-	}
-
-	Device struct {
-		Total     uint64
-		Used      uint64
-		Free      uint64
-		UsageRate float64
 	}
 
 	Disk struct {
-		Total     float64 `json:"total"`
-		Used      float64 `json:"used"`
-		Free      float64 `json:"free"`
-		UsageRate float64 `json:"usage_rate"`
+		MountPoint string  `json:"mount_point"`
+		Total      uint64  `json:"total"`
+		Used       uint64  `json:"used"`
+		Free       uint64  `json:"free"`
+		UsageRate  float64 `json:"usage_rate"`
 	}
 
 	Net struct {
@@ -92,6 +88,30 @@ func init() {
 	go updateCpuUsageRate() // 采集cpu率用率
 	go updateNetIo()        // 采集网络信息
 	go updateDiskIO()       // 采集磁盘io状态
+}
+
+type Hardware interface {
+	info() string
+}
+
+func (c *Cpu) info() string {
+	return fmt.Sprintf("[CPU] >>> useage rate: %.2f, loadavg: %.2f.",
+		c.UsageRate, c.Loadavg)
+}
+
+func (m *Memory) info() string {
+	return fmt.Sprintf("[Memory] >>> used: %.2f MB, free: %.2f MB, total: %.2f MB, useage rate: %.2f",
+		float64(m.Used/GB), float64(m.Free/MB), float64(m.Total/MB), m.UsageRate)
+}
+
+func (d *Disk) info() string {
+	return fmt.Sprintf("[Disk] >>> mount point: %s, used: %.2f GB, free: %.2f GB, total: %.2f GB, useage rate: %.2f",
+		d.MountPoint, float64(d.Used/GB), float64(d.Free/GB), float64(d.Total/GB), d.UsageRate)
+}
+
+func (n *Net) info() string {
+	return fmt.Sprintf("[Network] >>> in bandwidth: %.2f Mbps, out bandwidth: %.2f Mbps, in packets: %d, out packets: %d, tcp connections: %d",
+		n.InBandwidth, n.OutBandwidth, n.InPackets, n.OutPackets, n.TCPConns)
 }
 
 // get cpu loadavg
@@ -153,33 +173,27 @@ func getCpuStatus() (*Cpu, error) {
 	return &cpu, nil
 }
 
-func diskUsage(path string) (*Device, error) {
-	device := Device{}
+func diskUsage(path string) (*Disk, error) {
+	disk := Disk{}
 	fs := syscall.Statfs_t{}
 	err := syscall.Statfs(path, &fs)
 	if err != nil {
 		return nil, err
 	}
 
-	device.Total = fs.Blocks * uint64(fs.Bsize)
-	device.Free = fs.Bfree * uint64(fs.Bsize)
-	device.Used = device.Total - device.Free
-	return &device, nil
+	disk.MountPoint = path
+	disk.Total = fs.Blocks * uint64(fs.Bsize)
+	disk.Free = fs.Bfree * uint64(fs.Bsize)
+	disk.Used = disk.Total - disk.Free
+	return &disk, nil
 }
 
 // get storage status
-func getDiskUsage() (*Disk, error) {
-	var (
-		diskTotal float64
-		diskUsed  float64
-		diskFree  float64
-		usageRate float64
-	)
-
-	disk := Disk{}
+func getDiskUsage() (map[string]*Disk, error) {
+	disks := make(map[string]*Disk)
 	mounts, _ := fstab.ParseSystem()
 	for _, val := range mounts {
-		//fmt.Printf("%v\n", val.File)
+		//fmt.Printf("%v\n", val.String())
 		if val.File == "swap" || val.File == "/dev/shm" || val.File == "/dev/pts" ||
 			val.File == "/proc" || val.File == "/sys" || val.File == "none" {
 			continue
@@ -189,18 +203,11 @@ func getDiskUsage() (*Disk, error) {
 			return nil, err
 		}
 
-		diskTotal += float64(disk.Total) / float64(GB)
-		diskUsed += float64(disk.Used) / float64(GB)
-		diskFree += float64(disk.Free) / float64(GB)
+		disk.UsageRate = float64(disk.Used) / float64(disk.Total) * 100
+		disks[val.File] = disk
 	}
 
-	usageRate = diskUsed / diskTotal * 100
-	disk.Total = diskTotal
-	disk.Used = diskUsed
-	disk.Free = diskFree
-	disk.UsageRate = usageRate
-
-	return &disk, nil
+	return disks, nil
 }
 
 // get memory status
@@ -211,9 +218,10 @@ func getMemStatus() (*Memory, error) {
 		return nil, err
 	}
 
-	mem.Used = float64(memStatus.MemTotal - memStatus.MemAvailable)
-	mem.Total = float64(memStatus.MemTotal)
-	mem.UsageRate = mem.Used / float64(memStatus.MemTotal) * 100
+	mem.Used = memStatus.MemTotal - memStatus.MemAvailable
+	mem.Total = memStatus.MemTotal
+	mem.Free = memStatus.MemAvailable
+	mem.UsageRate = float64(mem.Used) / float64(memStatus.MemTotal) * 100
 
 	return &mem, nil
 }

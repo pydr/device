@@ -11,7 +11,7 @@ type Host struct {
 	Cpu    chan *Cpu
 	Memory chan *Memory
 	Net    chan *Net
-	Disk   chan *Disk
+	Disks  chan map[string]*Disk
 	DiskIO chan map[string]*IO
 	Time   time.Time
 }
@@ -63,7 +63,7 @@ func (h *Host) updateDiskUsage(t time.Duration) {
 			time.Sleep(t * time.Second)
 			continue
 		}
-		h.Disk <- diskStatus
+		h.Disks <- diskStatus
 		time.Sleep(t * time.Second)
 	}
 }
@@ -85,8 +85,8 @@ func NewDevice() *Host {
 	return &Host{
 		Cpu:    make(chan *Cpu, 2),
 		Memory: make(chan *Memory, 2),
-		Disk:   make(chan *Disk, 2),
 		Net:    make(chan *Net, 2),
+		Disks:  make(chan map[string]*Disk, 2),
 		DiskIO: make(chan map[string]*IO, 2),
 	}
 }
@@ -102,11 +102,10 @@ type (
 	}
 )
 
-// 启动监控程序
 func (h *Host) StartMonitor(config *MonitorConfig) {
 	go h.updateCpuStatus(config.CPUTime)
 	go h.updateMemStatus(config.MemTime)
 	go h.updateNetStatus(config.NetTime)
 	go h.updateDiskUsage(config.DiskTime)
-	go h.updateDiskIoStatus(config.IOTime)
+	//go h.updateDiskIoStatus(config.IOTime)
 }
